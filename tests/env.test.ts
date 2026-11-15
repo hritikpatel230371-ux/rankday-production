@@ -60,4 +60,31 @@ describe("server environment validation", () => {
       vi.unstubAllEnvs();
     }
   });
+
+  it("handles missing Supabase SSR credentials gracefully without throwing", async () => {
+    const { getSupabaseConfig } = await import("@/utils/supabase/config");
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "");
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "");
+
+    try {
+      expect(getSupabaseConfig()).toBeNull();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("returns parsed Supabase SSR configuration when valid credentials are present", async () => {
+    const { getSupabaseConfig } = await import("@/utils/supabase/config");
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://xyzcompany.supabase.co");
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "valid-publishable-key");
+
+    try {
+      const config = getSupabaseConfig();
+      expect(config).not.toBeNull();
+      expect(config?.url).toBe("https://xyzcompany.supabase.co");
+      expect(config?.publishableKey).toBe("valid-publishable-key");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
 });

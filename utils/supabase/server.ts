@@ -3,10 +3,15 @@ import { cookies } from "next/headers";
 import { getSupabaseConfig } from "@/utils/supabase/config";
 
 export async function createClient() {
+  const config = getSupabaseConfig();
+  if (!config) {
+    throw new Error(
+      "Missing Supabase configuration. Please set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY."
+    );
+  }
   const cookieStore = await cookies();
-  const { url, publishableKey } = getSupabaseConfig();
 
-  return createServerClient(url, publishableKey, {
+  return createServerClient(config.url, config.publishableKey, {
     cookies: {
       getAll() {
         return cookieStore.getAll();

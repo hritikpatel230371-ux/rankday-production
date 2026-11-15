@@ -5,15 +5,23 @@ const supabaseConfigSchema = z.object({
   publishableKey: z.string().min(1, "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY is required.")
 });
 
-export function getSupabaseConfig() {
+export type SupabaseConfig = z.infer<typeof supabaseConfigSchema>;
+
+export function getSupabaseConfig(): SupabaseConfig | null {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY?.trim();
+
+  if (!url || !publishableKey) {
+    return null;
+  }
+
   const parsed = supabaseConfigSchema.safeParse({
-    url: process.env.NEXT_PUBLIC_SUPABASE_URL,
-    publishableKey: process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+    url,
+    publishableKey
   });
 
   if (!parsed.success) {
-    const details = parsed.error.issues.map((issue) => issue.message).join(" ");
-    throw new Error(`Invalid Supabase configuration: ${details}`);
+    return null;
   }
 
   return parsed.data;
