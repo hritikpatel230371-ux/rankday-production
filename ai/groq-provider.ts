@@ -11,11 +11,11 @@ import { ZodError, z, type ZodTypeAny } from "zod";
 
 export class GroqProvider implements AIProvider {
   private groq: Groq;
-  private model: string;
+  private defaultModel: string;
 
   constructor(
     apiKey = process.env.GROQ_API_KEY || "",
-    model = process.env.GROQ_MODEL || "llama-3.1-8b-instant"
+    model = process.env.GROQ_MODEL || "openai/gpt-oss-120b"
   ) {
     if (!apiKey) {
       throw new AIProviderError(
@@ -25,42 +25,65 @@ export class GroqProvider implements AIProvider {
       );
     }
     this.groq = new Groq({ apiKey });
-    this.model = model;
+    this.defaultModel = model;
   }
 
   async generateJson(prompt: string) {
+    const modelsToTry = Array.from(new Set([
+      this.defaultModel,
+      "openai/gpt-oss-120b",
+      "openai/gpt-oss-20b",
+      "qwen/qwen3.8-27b",
+      "llama-3.3-70b-versatile",
+      "llama-3.1-8b-instant"
+    ]));
+
     let completion;
-    try {
-      completion = await this.groq.chat.completions.create({
-        model: this.model,
-        messages: [
-          {
-            role: "system",
-            content: "You are an AI assistant for RankDay productivity command center. You must respond strictly with valid JSON conforming to the requested schema. Return raw JSON only, no markdown."
-          },
-          {
-            role: "user",
-            content: prompt
-          }
-        ],
-        response_format: { type: "json_object" },
-        temperature: 0.3,
-        max_tokens: 8000
-      });
-    } catch (error: unknown) {
-      const err = error as { status?: number; message?: string };
-      if (err?.status === 401 || err?.status === 403) {
-        throw new AIProviderError("GROQ_AUTH", 502, "Groq rejected the API key. Please check your GROQ_API_KEY.");
+    let lastError: unknown;
+
+    for (const model of modelsToTry) {
+      try {
+        completion = await this.groq.chat.completions.create({
+          model,
+          messages: [
+            {
+              role: "system",
+              content: "You are an AI assistant for RankDay productivity command center. You must respond strictly with valid JSON conforming to the requested schema. Return raw JSON only, no markdown."
+            },
+            {
+              role: "user",
+              content: prompt
+            }
+          ],
+          response_format: { type: "json_object" },
+          temperature: 0.3,
+          max_tokens: 8000
+        });
+
+        if (completion?.choices?.[0]?.message?.content) {
+          break;
+        }
+      } catch (error: unknown) {
+        lastError = error;
+        const err = error as { status?: number; code?: string; message?: string };
+        // If model not found or unavailable, try next candidate model
+        if (err?.status === 404 || err?.code === "model_not_found") {
+          continue;
+        }
+        if (err?.status === 401 || err?.status === 403) {
+          throw new AIProviderError("GROQ_AUTH", 502, "Groq rejected the API key. Please check your GROQ_API_KEY.");
+        }
+        if (err?.status === 429) {
+          throw new AIProviderError("GROQ_QUOTA", 503, "Groq rate limit or quota was reached. Please try again later.");
+        }
+        throw new AIProviderError("GROQ_ERROR", 502, `Groq request failed: ${err?.message || "Unknown error"}`);
       }
-      if (err?.status === 429) {
-        throw new AIProviderError("GROQ_QUOTA", 503, "Groq rate limit or quota was reached. Please try again later.");
-      }
-      throw new AIProviderError("GROQ_ERROR", 502, `Groq request failed: ${err?.message || "Unknown error"}`);
     }
 
-    const content = completion.choices[0]?.message?.content;
+    const content = completion?.choices?.[0]?.message?.content;
     if (!content) {
-      throw new AIProviderError("GROQ_EMPTY", 502, "Groq returned an empty response. Please try again.");
+      const err = lastError as { message?: string } | undefined;
+      throw new AIProviderError("GROQ_EMPTY", 502, `Groq returned an empty response. ${err?.message || "Please try again."}`);
     }
 
     try {
@@ -160,10 +183,10 @@ ${text}`;
 Generate the MOST DETAILED, COMPREHENSIVE, MAXIMUM-LENGTH production storyboard and script possible based on these real user productivity facts. Do NOT give brief summaries—provide an exhaustive, professional creator blueprint with word-for-word dialogue, camera choreography, sound design, and a full caption.
 
 Context & Facts:
-- Range: ${input.rangeLabel}
+- Range: ${input.rangeLabel || "Today"}
 - Tone / Aesthetic: ${input.tone || "natural"}
 - Recorded Facts:
-${input.facts.map((f) => `  * ${f}`).join("\n")}
+${(input.facts || []).map((f) => `  * ${f}`).join("\n")}
 
 Respond strictly as a JSON object: {"script": "..."}.
 Inside the "script" string, structure your output with rich markdown headings, timestamps, and bullet points covering all 6 mandatory sections:
